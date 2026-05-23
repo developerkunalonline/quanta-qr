@@ -4,7 +4,7 @@ import {
   GAP_RATIO,
   RINGS,
   START_ANGLE
-} from './constants.js';
+} from './constants';
 
 export interface DrawOptions {
   ctx: CanvasRenderingContext2D;  // already-created 2d context

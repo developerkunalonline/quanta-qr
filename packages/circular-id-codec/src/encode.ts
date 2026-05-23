@@ -1,4 +1,4 @@
-import { TOTAL_BITS } from './constants.js';
+import { TOTAL_BITS } from './constants';
 
 /**
  * Encodes a numeric ID string into an 88-bit array of 0s and 1s.

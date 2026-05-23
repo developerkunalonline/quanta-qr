@@ -1,7 +1,7 @@
-import { preprocess } from './preprocess.js';
-import { findCenter, estimateCodeScale } from './centerDetect.js';
-import { tryAllRotations, SampleResult } from './ringsampler.js';
-import { decodeSafe } from '../decode.js';
+import { preprocess } from './preprocess';
+import { findCenter, estimateCodeScale } from './centerDetect';
+import { tryAllRotations, SampleResult } from './ringsampler';
+import { decodeSafe } from '../decode';
 
 export interface DecodeDebugInfo {
   threshold?: number;

@@ -1,4 +1,4 @@
-import { CENTER_RADIUS } from '../constants.js';
+import { CENTER_RADIUS } from '../constants';
 
 export interface CenterResult {
   cx: number;       // x coordinate of centroid

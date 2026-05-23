@@ -1,8 +1,8 @@
-export * from './constants.js';
-export * from './encode.js';
-export * from './decode.js';
-export * from './renderer.js';
-export * from './decoder/index.js';
+export * from './constants';
+export * from './encode';
+export * from './decode';
+export * from './renderer';
+export * from './decoder/index';
 
 /**
  * Validates and cleans a raw ID input string.

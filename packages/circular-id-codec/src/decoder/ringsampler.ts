@@ -1,4 +1,4 @@
-import { RINGS, START_ANGLE, GAP_RATIO } from '../constants.js';
+import { RINGS, START_ANGLE, GAP_RATIO } from '../constants';
 
 export interface SampleResult {
   bits: number[];         // 88 bits extracted
