@@ -22,45 +22,18 @@ export default function Scanner({ onSuccess, showBinarized = false }: ScannerPro
   const [isScanning, setIsScanning] = useState(false);
   const [uploadError, setUploadError] = useState<string | null>(null);
 
-  // Initialize and list cameras
+  // Initialize camera: request permission first, then enumerate devices for switcher
   useEffect(() => {
-    async function initCameras() {
-      try {
-        const devicesList = await navigator.mediaDevices.enumerateDevices();
-        const videoDevices = devicesList.filter(d => d.kind === 'videoinput');
-        setDevices(videoDevices);
-
-        if (videoDevices.length > 0) {
-          // Default to the last camera (often back camera on mobile)
-          const backCam = videoDevices.find(d => d.label.toLowerCase().includes('back')) || videoDevices[videoDevices.length - 1];
-          setSelectedDeviceId(backCam.deviceId);
-        }
-      } catch (err: any) {
-        console.error('Error listing video input devices:', err);
-        setScanError('Camera permission denied or not available.');
-      }
-    }
-    initCameras();
-  }, []);
-
-  // Handle stream initialization
-  useEffect(() => {
-    if (!selectedDeviceId) return;
-
     let activeStream: MediaStream | null = null;
 
-    async function startCamera() {
+    async function initCamera() {
       try {
-        if (stream) {
-          stream.getTracks().forEach(t => t.stop());
-        }
-
+        // Step 1: Request camera access directly (triggers permission prompt)
         const constraints: MediaStreamConstraints = {
           video: {
-            deviceId: { exact: selectedDeviceId },
-            width: { ideal: 640 },
-            height: { ideal: 640 },
-            facingMode: 'environment'
+            facingMode: { ideal: 'environment' },
+            width: { ideal: 1280 },
+            height: { ideal: 720 }
           }
         };
 
@@ -74,21 +47,85 @@ export default function Scanner({ onSuccess, showBinarized = false }: ScannerPro
           videoRef.current.play();
         }
 
-        // Check for torch capability
-        const track = activeStream.getVideoTracks()[0];
-        const capabilities = track.getCapabilities ? track.getCapabilities() : {};
-        if ('torch' in capabilities) {
-          setHasFlashlight(true);
-        } else {
-          setHasFlashlight(false);
+        // Step 2: Now enumerate devices (labels/IDs are available after permission)
+        const devicesList = await navigator.mediaDevices.enumerateDevices();
+        const videoDevices = devicesList.filter(d => d.kind === 'videoinput');
+        setDevices(videoDevices);
+
+        // Track the active device
+        const activeTrack = activeStream.getVideoTracks()[0];
+        const activeSettings = activeTrack.getSettings();
+        if (activeSettings.deviceId) {
+          setSelectedDeviceId(activeSettings.deviceId);
         }
+
+        // Check for torch
+        const capabilities = activeTrack.getCapabilities ? activeTrack.getCapabilities() : {};
+        setHasFlashlight('torch' in capabilities);
       } catch (err: any) {
-        console.error('Error starting video stream:', err);
-        setScanError('Could not access the selected camera.');
+        console.error('Error initializing camera:', err);
+        if (err?.name === 'NotAllowedError') {
+          setScanError('Camera permission denied. Please allow camera access in your browser settings.');
+        } else if (err?.name === 'NotFoundError') {
+          setScanError('No camera found on this device.');
+        } else {
+          setScanError('Could not access camera: ' + (err?.message || 'Unknown error'));
+        }
       }
     }
 
-    startCamera();
+    initCamera();
+
+    return () => {
+      if (activeStream) {
+        activeStream.getTracks().forEach(t => t.stop());
+      }
+    };
+  }, []);
+
+  // Switch camera when user selects a different device
+  useEffect(() => {
+    if (!selectedDeviceId || !stream) return;
+
+    // Don't restart if already on this device
+    const currentTrack = stream.getVideoTracks()[0];
+    const currentSettings = currentTrack?.getSettings();
+    if (currentSettings?.deviceId === selectedDeviceId) return;
+
+    let activeStream: MediaStream | null = null;
+
+    async function switchCamera() {
+      try {
+        stream?.getTracks().forEach(t => t.stop());
+
+        const constraints: MediaStreamConstraints = {
+          video: {
+            deviceId: { exact: selectedDeviceId },
+            width: { ideal: 1280 },
+            height: { ideal: 720 }
+          }
+        };
+
+        activeStream = await navigator.mediaDevices.getUserMedia(constraints);
+        setStream(activeStream);
+
+        if (videoRef.current) {
+          videoRef.current.srcObject = activeStream;
+          videoRef.current.setAttribute('playsinline', 'true');
+          videoRef.current.play();
+        }
+
+        const track = activeStream.getVideoTracks()[0];
+        const capabilities = track.getCapabilities ? track.getCapabilities() : {};
+        setHasFlashlight('torch' in capabilities);
+        setFlashlightOn(false);
+      } catch (err: any) {
+        console.error('Error switching camera:', err);
+        setScanError('Could not switch to selected camera.');
+      }
+    }
+
+    switchCamera();
 
     return () => {
       if (activeStream) {
