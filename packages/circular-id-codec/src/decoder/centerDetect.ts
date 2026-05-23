@@ -5,42 +5,48 @@ export interface CenterResult {
   cy: number;       // y coordinate of centroid
   radius: number;   // estimated radius of center circle in pixels
   confidence: number; // 0-1 score
+  // Ellipse moments for perspective correction
+  axisA?: number;
+  axisB?: number;
+  ellipseAngle?: number;
 }
 
 /**
  * Finds the solid center anchor circle within a binary image.
  * Uses a density-seeded flood-fill to find the central dark blob, then evaluates centroid and circularity.
+ * It also computes the second-order central moments of the blob to estimate perspective distortion (ellipse model).
  */
 export function findCenter(binary: Uint8Array, width: number, height: number): CenterResult | null {
   const totalPixels = width * height;
   if (totalPixels === 0) return null;
 
-
-
-  // Let's write the density and flood-fill loops extremely cleanly:
-  // We can scan the entire image in a structured way to find dark pixels and flood fill them,
-  // or use the zone density search. Let's do a robust search.
-  // Actually, a simpler and extremely robust method is:
-  // Iterate through the image, and whenever we find an unvisited dark pixel (1), we flood fill it.
-  // We track the largest blob that matches circularity characteristics. This is 100% reliable!
-  // Let's implement this!
-
   const visited = new Uint8Array(totalPixels);
-  let bestBlob: { cx: number; cy: number; radius: number; confidence: number; pixelCount: number; score: number } | null = null;
+  let bestBlob: {
+    cx: number;
+    cy: number;
+    radius: number;
+    confidence: number;
+    pixelCount: number;
+    score: number;
+    axisA: number;
+    axisB: number;
+    ellipseAngle: number;
+  } | null = null;
 
-  const maxFillLimit = 200000; // robust limit for large resolutions
+  const maxFillLimit = 200000;
 
-  for (let y = 4; y < height - 4; y += 2) { // step by 2 for scanning speed
+  for (let y = 4; y < height - 4; y += 2) {
     for (let x = 4; x < width - 4; x += 2) {
       const idx = y * width + x;
       if (binary[idx] === 1 && visited[idx] === 0) {
-        // Start iterative flood fill
         let pixelCount = 0;
         let sumX = 0;
         let sumY = 0;
+        let sumX2 = 0;
+        let sumY2 = 0;
+        let sumXY = 0;
         let perimeter = 0;
 
-        // Use a flat array as stack
         const stack: number[] = [idx];
         visited[idx] = 1;
 
@@ -57,14 +63,16 @@ export function findCenter(binary: Uint8Array, width: number, height: number): C
 
           sumX += cx_val;
           sumY += cy_val;
+          sumX2 += cx_val * cx_val;
+          sumY2 += cy_val * cy_val;
+          sumXY += cx_val * cy_val;
 
-          // Check neighbors
           let isPerimeter = false;
           const neighbors = [
-            currIdx - 1,          // West
-            currIdx + 1,          // East
-            currIdx - width,      // North
-            currIdx + width       // South
+            currIdx - 1,
+            currIdx + 1,
+            currIdx - width,
+            currIdx + width
           ];
 
           for (let n = 0; n < 4; n++) {
@@ -73,7 +81,6 @@ export function findCenter(binary: Uint8Array, width: number, height: number): C
               const nx = nIdx % width;
               const ny = Math.floor(nIdx / width);
 
-              // check boundaries
               if (Math.abs(nx - cx_val) <= 1 && Math.abs(ny - cy_val) <= 1) {
                 if (binary[nIdx] === 0) {
                   isPerimeter = true;
@@ -92,33 +99,47 @@ export function findCenter(binary: Uint8Array, width: number, height: number): C
           }
         }
 
-        // Evaluate this blob
-        if (pixelCount >= 30 && pixelCount < maxFillLimit) {
+        if (pixelCount >= 25 && pixelCount < maxFillLimit) {
           const cx = sumX / pixelCount;
           const cy = sumY / pixelCount;
           const radius = Math.sqrt(pixelCount / Math.PI);
 
-          // Hardening: Filter out blobs that are too large to be the center anchor
-          if (radius > Math.min(width, height) * 0.20) {
+          if (radius > Math.min(width, height) * 0.22) {
             continue;
           }
 
-          // Circularity: (4 * Math.PI * A) / (P^2)
-          // For single pixel/small circularity calculations, enforce perimeter > 0
+          // Calculate central moments
+          const mu20 = (sumX2 / pixelCount) - cx * cx;
+          const mu02 = (sumY2 / pixelCount) - cy * cy;
+          const mu11 = (sumXY / pixelCount) - cx * cy;
+
+          // Covariance eigenvalues
+          const delta = mu20 - mu02;
+          const term = Math.sqrt(delta * delta + 4 * mu11 * mu11);
+          const l1 = (mu20 + mu02 + term) / 2;
+          const l2 = (mu20 + mu02 - term) / 2;
+
+          const axisA = 2 * Math.sqrt(Math.max(0, l1));
+          const axisB = 2 * Math.sqrt(Math.max(0, l2));
+          const ellipseAngle = 0.5 * Math.atan2(2 * mu11, delta);
+
+          // We check aspect ratio: too flat is rejected
+          if (axisA > 0) {
+            const ratio = axisB / axisA;
+            if (ratio < 0.45) continue; // too flat to be a circular code
+          }
+
           const actualPerimeter = perimeter > 0 ? perimeter : 2 * Math.PI * radius;
           const circularity = (4 * Math.PI * pixelCount) / (actualPerimeter * actualPerimeter);
 
-          // Circularity confidence: clamp to 1.0
           const circularityConfidence = Math.min(1.0, circularity);
-
-          // Penalize very small blobs
-          const sizeConfidence = Math.min(1.0, pixelCount / 200);
+          const sizeConfidence = Math.min(1.0, pixelCount / 180);
           const confidence = circularityConfidence * sizeConfidence;
           const score = confidence * pixelCount;
 
-          if (confidence >= 0.3) {
+          if (confidence >= 0.25) {
             if (!bestBlob || score > bestBlob.score) {
-              bestBlob = { cx, cy, radius, confidence, pixelCount, score };
+              bestBlob = { cx, cy, radius, confidence, pixelCount, score, axisA, axisB, ellipseAngle };
             }
           }
         }
@@ -134,7 +155,10 @@ export function findCenter(binary: Uint8Array, width: number, height: number): C
     cx: bestBlob.cx,
     cy: bestBlob.cy,
     radius: bestBlob.radius,
-    confidence: bestBlob.confidence
+    confidence: bestBlob.confidence,
+    axisA: bestBlob.axisA,
+    axisB: bestBlob.axisB,
+    ellipseAngle: bestBlob.ellipseAngle
   };
 }
 

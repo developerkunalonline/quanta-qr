@@ -17,6 +17,7 @@ export interface DecodeDebugInfo {
   bitsExtracted?: number[];
   angleOffsetUsed?: number;
   binary?: Uint8Array;
+  sharpness?: number;
 }
 
 export type DecodeResult =
@@ -29,7 +30,8 @@ export type DecodeResult =
 export function decodeImage(
   rgba: Uint8ClampedArray,
   width: number,
-  height: number
+  height: number,
+  forceAdaptive: boolean = false
 ): DecodeResult {
   const debug: DecodeDebugInfo = {};
 
@@ -53,12 +55,11 @@ export function decodeImage(
       };
     }
 
-    // 1. Preprocess (Grayscale + Otsu thresholding + Binarization)
-    const { binary, threshold } = preprocess(rgba, width, height);
+    // 1. Preprocess (Grayscale + Otsu thresholding + Binarization + Sharpness check)
+    const { binary, threshold, sharpness } = preprocess(rgba, width, height, forceAdaptive);
     debug.threshold = threshold;
-
-    // Save binary in debug for real-time visual inspection
     debug.binary = binary;
+    debug.sharpness = sharpness;
 
     // 2. Find Center Circle (Double-pass polarity search)
     let centerResult = findCenter(binary, width, height);
@@ -96,14 +97,17 @@ export function decodeImage(
     const scale = estimateCodeScale(centerResult.radius);
     debug.scale = scale;
 
-    // 4. Sample Rings with Swept Rotations (tries every 30 degrees)
+    // 4. Sample Rings with Swept Rotations and Elliptical Perspective Correction
     const sampleResult = tryAllRotations(
       binary,
       width,
       height,
       centerResult.cx,
       centerResult.cy,
-      scale
+      scale,
+      centerResult.axisA,
+      centerResult.axisB,
+      centerResult.ellipseAngle
     );
 
     if (!sampleResult) {

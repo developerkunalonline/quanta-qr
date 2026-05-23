@@ -4,6 +4,14 @@ export interface GrayImage {
   height: number;
 }
 
+export interface PreprocessResult {
+  binary: Uint8Array;
+  threshold: number;
+  width: number;
+  height: number;
+  sharpness: number;
+}
+
 export function toGrayscale(rgba: Uint8ClampedArray, width: number, height: number): GrayImage {
   const pixelCount = width * height;
   const grayData = new Uint8Array(pixelCount);
@@ -14,6 +22,44 @@ export function toGrayscale(rgba: Uint8ClampedArray, width: number, height: numb
     grayData[i] = (77 * r + 150 * g + 29 * b) >> 8;
   }
   return { data: grayData, width, height };
+}
+
+/**
+ * Estimates the sharpness of a grayscale image using a 3x3 Laplacian filter kernel.
+ * Calculates the variance of the Laplacian values.
+ * Blurry/out-of-focus images yield a very low variance (< 3.0), allowing us to skip them entirely.
+ */
+export function estimateSharpness(gray: GrayImage): number {
+  const { data, width, height } = gray;
+  const n = (width - 2) * (height - 2);
+  if (n <= 0) return 0;
+
+  const gradients = new Float32Array(n);
+  let gIdx = 0;
+  let gradSum = 0;
+
+  for (let y = 1; y < height - 1; y++) {
+    for (let x = 1; x < width - 1; x++) {
+      const idx = y * width + x;
+      // Laplacian 3x3 filter
+      const val = data[idx] * -4 +
+                  data[idx - 1] +
+                  data[idx + 1] +
+                  data[idx - width] +
+                  data[idx + width];
+      gradients[gIdx++] = val;
+      gradSum += val;
+    }
+  }
+
+  const mean = gradSum / n;
+  let varianceSum = 0;
+  for (let i = 0; i < n; i++) {
+    const diff = gradients[i] - mean;
+    varianceSum += diff * diff;
+  }
+
+  return varianceSum / n;
 }
 
 export function computeOtsuThreshold(gray: GrayImage): number {
@@ -95,30 +141,28 @@ export function adaptiveBinarise(gray: GrayImage, blockRadius: number = 20, bias
   return binary;
 }
 
-export interface PreprocessResult {
-  binary: Uint8Array;
-  threshold: number;
-  width: number;
-  height: number;
-}
-
 /**
- * Dual-mode preprocessing:
- * - Runs Otsu global thresholding first (fast path, works for good even lighting)
- * - If Otsu threshold is extreme (< 60 or > 195), the image has bad contrast/lighting
- *   so we fall back to integral-image adaptive thresholding (handles shadows/gradients)
+ * Preprocessing with sharpness estimation and dual-mode thresholding.
+ * Supports forcing adaptive local thresholding (for camera feeds) while keeping
+ * Otsu global thresholding as default (for crisp vector/test images).
  */
-export function preprocess(rgba: Uint8ClampedArray, width: number, height: number): PreprocessResult {
+export function preprocess(
+  rgba: Uint8ClampedArray,
+  width: number,
+  height: number,
+  forceAdaptive: boolean = false
+): PreprocessResult {
   const gray = toGrayscale(rgba, width, height);
+  const sharpness = estimateSharpness(gray);
   const threshold = computeOtsuThreshold(gray);
 
   let binary: Uint8Array;
-  if (threshold < 60 || threshold > 195) {
-    // Uneven lighting detected — use adaptive local thresholding
-    binary = adaptiveBinarise(gray, 20, 8);
+  if (forceAdaptive || threshold < 60 || threshold > 195) {
+    // Force local adaptive thresholding or handle uneven lighting
+    binary = adaptiveBinarise(gray, 24, 7);
   } else {
     binary = binarise(gray, threshold);
   }
 
-  return { binary, threshold, width, height };
+  return { binary, threshold, width, height, sharpness };
 }

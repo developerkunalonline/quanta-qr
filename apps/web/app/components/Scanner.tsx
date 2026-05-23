@@ -159,6 +159,7 @@ export default function Scanner({ onSuccess, showBinarized = false }: ScannerPro
     // Track last decode result for overlay feedback (no confirmation buffer — single decode fires)
     let lastStage: string = 'searching';
     let lastError: string = '';
+    let lastCenterRadius: number = 0;
 
     const processFrame = () => {
       const video = videoRef.current;
@@ -231,15 +232,25 @@ export default function Scanner({ onSuccess, showBinarized = false }: ScannerPro
         // Status text at bottom of scan zone
         oCtx.font = 'bold 12px system-ui, sans-serif';
         oCtx.textAlign = 'center';
-        const statusMsg = lastStage === 'ok'
-          ? ''
-          : lastStage === 'center'
-          ? '⬤ Move closer or improve lighting'
-          : lastStage === 'sample'
-          ? '◎ Center the code inside the box'
-          : lastStage === 'decode'
-          ? '⚠ Decode failed — try different angle'
-          : '· Scanning...';
+        
+        let statusMsg = '· Scanning...';
+        if (lastStage === 'ok') {
+          statusMsg = '';
+        } else if (lastError.includes('blurry')) {
+          statusMsg = '📸 Hold steady — frame is blurry';
+        } else if (lastStage === 'center') {
+          statusMsg = '⬤ Align circular QR inside square';
+        } else if (lastStage === 'sample') {
+          // Dynamic scale/distance check
+          if (lastCenterRadius > 0 && lastCenterRadius < 13.5) {
+            statusMsg = '🔍 Move closer — code is too far';
+          } else {
+            statusMsg = '◎ Center the code inside the box';
+          }
+        } else if (lastStage === 'decode') {
+          statusMsg = '⚠ Decode failed — try different angle';
+        }
+
         if (statusMsg) {
           oCtx.fillStyle = 'rgba(0,0,0,0.55)';
           oCtx.fillRect(cx - 160, cy + half + 6, 320, 22);
@@ -270,7 +281,8 @@ export default function Scanner({ onSuccess, showBinarized = false }: ScannerPro
           ctx.drawImage(video, sx, sy, cropSize, cropSize, 0, 0, procSize, procSize);
 
           const imgData = ctx.getImageData(0, 0, procSize, procSize);
-          const result = decodeImage(imgData.data, procSize, procSize);
+          const result = decodeImage(imgData.data, procSize, procSize, true);
+          const sharpness = result.debug?.sharpness || 999;
 
           // Show binarized debug view if toggle is on
           if (showBinarized && result.debug?.binary) {
@@ -286,9 +298,14 @@ export default function Scanner({ onSuccess, showBinarized = false }: ScannerPro
             ctx.putImageData(binImgData, 0, 0);
           }
 
-          if (result.ok) {
+          if (sharpness < 3.0) {
+            lastStage = 'preprocess';
+            lastError = 'Frame is too blurry — hold camera steady';
+            lastCenterRadius = 0;
+          } else if (result.ok) {
             lastStage = 'ok';
             lastError = '';
+            lastCenterRadius = result.debug.centerFound?.radius || 0;
 
             // Draw green confirmation ring on overlay
             if (oCtx && result.debug.centerFound) {
@@ -316,6 +333,7 @@ export default function Scanner({ onSuccess, showBinarized = false }: ScannerPro
           } else {
             lastStage = result.stage;
             lastError = result.error;
+            lastCenterRadius = result.debug.centerFound?.radius || 0;
           }
         }
       }
