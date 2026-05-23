@@ -70,22 +70,26 @@ export function sampleRings(
 
   // Validate R1 sync ring (12 segments, alternating)
   const r1Samples = perRingSamples[0];
-  let r1Mismatches = 0;
+  let r1MismatchesA = 0;
+  let r1MismatchesB = 0;
   for (let i = 0; i < 12; i++) {
-    if (r1Samples[i] !== (i % 2 === 0 ? 1 : 0)) r1Mismatches++;
+    if (r1Samples[i] !== (i % 2 === 0 ? 1 : 0)) r1MismatchesA++;
+    if (r1Samples[i] !== (i % 2 === 0 ? 0 : 1)) r1MismatchesB++;
   }
-  syncR1Valid = r1Mismatches <= 3;
+  syncR1Valid = Math.min(r1MismatchesA, r1MismatchesB) <= 3;
 
   // Validate R6 sync ring (32 segments, alternating)
   const r6Samples = perRingSamples[5];
-  let r6Mismatches = 0;
+  let r6MismatchesA = 0;
+  let r6MismatchesB = 0;
   for (let i = 0; i < 32; i++) {
-    if (r6Samples[i] !== (i % 2 === 0 ? 1 : 0)) r6Mismatches++;
+    if (r6Samples[i] !== (i % 2 === 0 ? 1 : 0)) r6MismatchesA++;
+    if (r6Samples[i] !== (i % 2 === 0 ? 0 : 1)) r6MismatchesB++;
   }
-  syncR6Valid = r6Mismatches <= 7;
+  syncR6Valid = Math.min(r6MismatchesA, r6MismatchesB) <= 6;
 
-  // Both must be valid to guarantee correct orientation and eliminate wrong ID decodes
-  if (!syncR1Valid || !syncR6Valid) {
+  // Relaxed validation: at least one sync ring must be valid (highly tolerant to outer ring crop/blur)
+  if (!syncR1Valid && !syncR6Valid) {
     return null;
   }
 
