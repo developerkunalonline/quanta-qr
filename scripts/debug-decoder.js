@@ -1,4 +1,4 @@
-const { createCanvas } = require('canvas');
+const { createCanvas } = require('@napi-rs/canvas');
 const { encode, drawCircularCode, decodeImage } = require('../packages/circular-id-codec/dist/index.js');
 
 try {

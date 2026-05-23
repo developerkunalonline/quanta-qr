@@ -1,6 +1,6 @@
 import { describe, it, expect } from 'vitest';
 import { encode, drawCircularCode, decodeImage } from '../src/index.js';
-import { createCanvas } from 'canvas';
+import { createCanvas } from '@napi-rs/canvas';
 
 describe('Circular ID Decoder Integration Tests', () => {
   const testId = '12345678901234567890';

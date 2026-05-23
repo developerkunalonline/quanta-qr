@@ -1,6 +1,6 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { validateId, encode, drawCircularCode } from '@circular-id/codec';
-import { createCanvas } from 'canvas';
+import { createCanvas } from '@napi-rs/canvas';
 
 export async function GET(request: NextRequest) {
   try {

@@ -1,7 +1,7 @@
 'use server';
 
 import { validateId, encode, drawCircularCode } from '@circular-id/codec';
-import { createCanvas } from 'canvas';
+import { createCanvas } from '@napi-rs/canvas';
 
 export interface BatchItemResult {
   id: string;

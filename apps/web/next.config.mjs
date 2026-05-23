@@ -8,6 +8,9 @@ const nextConfig = {
     // Warning: Allow production builds to successfully complete even if type issues exist in dependencies.
     ignoreBuildErrors: true,
   },
+  experimental: {
+    serverComponentsExternalPackages: ['@napi-rs/canvas'],
+  },
 };
 
 export default nextConfig;
