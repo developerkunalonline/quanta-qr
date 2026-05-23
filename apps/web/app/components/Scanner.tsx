@@ -155,7 +155,10 @@ export default function Scanner({ onSuccess, showBinarized = false }: ScannerPro
 
     let animationId: number;
     let lastScanTime = 0;
-    const scanIntervalMs = 150; // Scan every 150ms
+    const scanIntervalMs = 100; // Scan every 100ms
+    let lastDecodedId = '';
+    let consecutiveMatches = 0;
+    const CONFIRM_THRESHOLD = 2; // require 2 consecutive same-ID decodes
 
     const processFrame = () => {
       const video = videoRef.current;
@@ -208,14 +211,14 @@ export default function Scanner({ onSuccess, showBinarized = false }: ScannerPro
 
         const ctx = canvas.getContext('2d');
         if (ctx && video.videoWidth > 0 && video.videoHeight > 0) {
-          // Draw at a fixed processing size for speed
-          const procSize = 400;
+          // Use 500px for better resolution at all zoom levels
+          const procSize = 500;
           if (canvas.width !== procSize) {
             canvas.width = procSize;
             canvas.height = procSize;
           }
 
-          // Crop and draw the center square of the video frame
+          // Use full frame (letterboxed to square) for maximum coverage
           const vWidth = video.videoWidth;
           const vHeight = video.videoHeight;
           const cropSize = Math.min(vWidth, vHeight);
@@ -242,6 +245,18 @@ export default function Scanner({ onSuccess, showBinarized = false }: ScannerPro
           }
 
           if (result.ok) {
+            // Confirmation buffer: require N consecutive same-ID matches
+            if (result.id === lastDecodedId) {
+              consecutiveMatches++;
+            } else {
+              lastDecodedId = result.id;
+              consecutiveMatches = 1;
+            }
+            if (consecutiveMatches < CONFIRM_THRESHOLD) {
+              animationId = requestAnimationFrame(processFrame);
+              return;
+            }
+            consecutiveMatches = 0; // reset after confirmed trigger
             // Draw a green circle around the centroid on the overlay!
             if (oCtx && result.debug.centerFound) {
               const { cx: dCx, cy: dCy, radius } = result.debug.centerFound;

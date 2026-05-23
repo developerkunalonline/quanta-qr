@@ -1,16 +1,16 @@
 import { RINGS, START_ANGLE, GAP_RATIO } from '../constants';
 
 export interface SampleResult {
-  bits: number[];         // 88 bits extracted
-  syncR1Valid: boolean;   // did R1 alternating pattern validate?
-  syncR6Valid: boolean;   // did R6 alternating pattern validate?
-  perRingThresholds: number[]; // one threshold per ring for debugging
+  bits: number[];
+  syncR1Valid: boolean;
+  syncR6Valid: boolean;
+  perRingThresholds: number[];
   angleOffsetUsed: number;
 }
 
 /**
- * Samples the concentric data and sync rings of a circular barcode.
- * Uses 3-point radial averaging to reduce single-pixel noise.
+ * Samples a single ring at a given angle offset.
+ * Uses 5-point radial averaging for better noise rejection.
  */
 export function sampleRings(
   binary: Uint8Array,
@@ -28,7 +28,6 @@ export function sampleRings(
   let syncR1Valid = false;
   let syncR6Valid = false;
 
-  // STEP 1 & 2: Sample all 6 rings
   for (let rIndex = 0; rIndex < RINGS.length; rIndex++) {
     const ring = RINGS[rIndex];
     const scaledRadius = ring.radius * scale;
@@ -40,7 +39,6 @@ export function sampleRings(
     const ringSamples: number[] = [];
 
     for (let i = 0; i < ring.segments; i++) {
-      // Calculate sample angle (middle of the dash area)
       const sampleAngle =
         START_ANGLE +
         angleOffset +
@@ -48,96 +46,68 @@ export function sampleRings(
         gapAngle / 2 +
         dashAngle / 2;
 
-      // Hardening: radial multi-sampling (3 points: inner, center, outer)
-      const rInner = scaledRadius - scaledLineWidth * 0.3;
-      const rCenter = scaledRadius;
-      const rOuter = scaledRadius + scaledLineWidth * 0.3;
-
+      // 5-point radial averaging (inner, inner-mid, center, outer-mid, outer)
+      const offsets = [-0.4, -0.2, 0, 0.2, 0.4];
       let darkSum = 0;
 
-      const samplePoint = (r: number) => {
+      for (const offset of offsets) {
+        const r = scaledRadius + offset * scaledLineWidth;
         const px = Math.round(cx + r * Math.cos(sampleAngle));
         const py = Math.round(cy + r * Math.sin(sampleAngle));
         const clampedX = Math.max(0, Math.min(width - 1, px));
         const clampedY = Math.max(0, Math.min(height - 1, py));
-        return binary[clampedY * width + clampedX];
-      };
+        darkSum += binary[clampedY * width + clampedX];
+      }
 
-      darkSum += samplePoint(rInner);
-      darkSum += samplePoint(rCenter);
-      darkSum += samplePoint(rOuter);
-
-      // Average thresholded at 0.5
-      const bitValue = (darkSum / 3) >= 0.5 ? 1 : 0;
+      // Majority vote across 5 samples
+      const bitValue = darkSum >= 3 ? 1 : 0;
       ringSamples.push(bitValue);
     }
 
     perRingSamples.push(ringSamples);
-    perRingThresholds.push(0.5); // Using binary directly for V1
+    perRingThresholds.push(0.5);
   }
 
-  // STEP 3: Validate Sync Rings (R1 and R6)
-  // R1 (index 0): 12 segments. Expected alternating pattern: 1, 0, 1, 0, 1, 0, ...
+  // Validate R1 sync ring (12 segments, alternating)
   const r1Samples = perRingSamples[0];
-  let r1MismatchesPatternA = 0; // expected: 1010...
-  let r1MismatchesPatternB = 0; // expected: 0101...
+  let r1MismatchesA = 0;
+  let r1MismatchesB = 0;
   for (let i = 0; i < 12; i++) {
-    const expectedA = i % 2 === 0 ? 1 : 0;
-    const expectedB = i % 2 === 0 ? 0 : 1;
-    if (r1Samples[i] !== expectedA) r1MismatchesPatternA++;
-    if (r1Samples[i] !== expectedB) r1MismatchesPatternB++;
+    if (r1Samples[i] !== (i % 2 === 0 ? 1 : 0)) r1MismatchesA++;
+    if (r1Samples[i] !== (i % 2 === 0 ? 0 : 1)) r1MismatchesB++;
   }
-  const r1Mismatches = Math.min(r1MismatchesPatternA, r1MismatchesPatternB);
-  // Relaxed tolerance: up to 3 mismatches out of 12
-  syncR1Valid = r1Mismatches <= 3;
+  syncR1Valid = Math.min(r1MismatchesA, r1MismatchesB) <= 3;
 
-  // R6 (index 5): 32 segments. Expected alternating pattern
+  // Validate R6 sync ring (32 segments, alternating)
   const r6Samples = perRingSamples[5];
-  let r6MismatchesPatternA = 0;
-  let r6MismatchesPatternB = 0;
+  let r6MismatchesA = 0;
+  let r6MismatchesB = 0;
   for (let i = 0; i < 32; i++) {
-    const expectedA = i % 2 === 0 ? 1 : 0;
-    const expectedB = i % 2 === 0 ? 0 : 1;
-    if (r6Samples[i] !== expectedA) r6MismatchesPatternA++;
-    if (r6Samples[i] !== expectedB) r6MismatchesPatternB++;
+    if (r6Samples[i] !== (i % 2 === 0 ? 1 : 0)) r6MismatchesA++;
+    if (r6Samples[i] !== (i % 2 === 0 ? 0 : 1)) r6MismatchesB++;
   }
-  const r6Mismatches = Math.min(r6MismatchesPatternA, r6MismatchesPatternB);
-  // Relaxed tolerance: up to 5 mismatches out of 32
-  syncR6Valid = r6Mismatches <= 5;
+  syncR6Valid = Math.min(r6MismatchesA, r6MismatchesB) <= 6;
 
-  // Reject only if BOTH sync rings fail
   if (!syncR1Valid && !syncR6Valid) {
     return null;
   }
 
-  // STEP 4: Assemble bits array (88 bits) from data rings R2-R5
-  // R2 (index 1): 16 bits
-  const r2Bits = perRingSamples[1];
-  bits.push(...r2Bits);
-
-  // R3 (index 2): 24 bits
-  const r3Bits = perRingSamples[2];
-  bits.push(...r3Bits);
-
-  // R4 (index 3): 24 bits
-  const r4Bits = perRingSamples[3];
-  bits.push(...r4Bits);
-
-  // R5 (index 4): 24 bits
-  const r5Bits = perRingSamples[4];
-  bits.push(...r5Bits);
+  bits.push(...perRingSamples[1]); // R2: 16 bits
+  bits.push(...perRingSamples[2]); // R3: 24 bits
+  bits.push(...perRingSamples[3]); // R4: 24 bits
+  bits.push(...perRingSamples[4]); // R5: 24 bits
 
   return {
     bits,
     syncR1Valid,
     syncR6Valid,
     perRingThresholds,
-    angleOffsetUsed: angleOffset
+    angleOffsetUsed: angleOffset,
   };
 }
 
 /**
- * Tries 12 different rotation increments (30 degrees each) to find a valid alignment.
+ * Tries 24 rotation steps (every 15 degrees) for finer alignment recovery.
  */
 export function tryAllRotations(
   binary: Uint8Array,
@@ -147,9 +117,9 @@ export function tryAllRotations(
   cy: number,
   scale: number
 ): SampleResult | null {
-  // Try 12 angles around the circle
-  for (let step = 0; step < 12; step++) {
-    const angleOffset = (step * 30 * Math.PI) / 180;
+  // 24 steps × 15° = full 360° coverage with half the previous blind spots
+  for (let step = 0; step < 24; step++) {
+    const angleOffset = (step * 15 * Math.PI) / 180;
     const result = sampleRings(binary, width, height, cx, cy, scale, angleOffset);
     if (result !== null) {
       return result;
