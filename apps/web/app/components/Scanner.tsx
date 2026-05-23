@@ -155,7 +155,7 @@ export default function Scanner({ onSuccess, showBinarized = false }: ScannerPro
 
     let animationId: number;
     let lastScanTime = 0;
-    const scanIntervalMs = 100; // Scan every 100ms
+    const scanIntervalMs = 120; // balanced: fast enough without overloading main thread
     let lastDecodedId = '';
     let consecutiveMatches = 0;
     const CONFIRM_THRESHOLD = 2; // require 2 consecutive same-ID decodes
@@ -211,8 +211,7 @@ export default function Scanner({ onSuccess, showBinarized = false }: ScannerPro
 
         const ctx = canvas.getContext('2d');
         if (ctx && video.videoWidth > 0 && video.videoHeight > 0) {
-          // Use 500px for better resolution at all zoom levels
-          const procSize = 500;
+          const procSize = 400;
           if (canvas.width !== procSize) {
             canvas.width = procSize;
             canvas.height = procSize;

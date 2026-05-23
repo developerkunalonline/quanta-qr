@@ -11,7 +11,7 @@ export function toGrayscale(rgba: Uint8ClampedArray, width: number, height: numb
     const r = rgba[i * 4];
     const g = rgba[i * 4 + 1];
     const b = rgba[i * 4 + 2];
-    grayData[i] = (77 * r + 150 * g + 29 * b) >> 8; // fast integer luminance
+    grayData[i] = (77 * r + 150 * g + 29 * b) >> 8;
   }
   return { data: grayData, width, height };
 }
@@ -40,46 +40,58 @@ export function computeOtsuThreshold(gray: GrayImage): number {
   return threshold;
 }
 
-/**
- * Adaptive local block thresholding.
- * Divides image into blockSize×blockSize tiles and thresholds each
- * tile at (localMean * sensitivity). Much better for uneven lighting.
- */
-export function adaptiveBinarise(gray: GrayImage, blockSize: number = 32, sensitivity: number = 0.85): Uint8Array {
-  const { data, width, height } = gray;
+export function binarise(gray: GrayImage, threshold: number): Uint8Array {
+  const data = gray.data;
   const binary = new Uint8Array(data.length);
-  const halfBlock = Math.floor(blockSize / 2);
-
-  for (let y = 0; y < height; y++) {
-    for (let x = 0; x < width; x++) {
-      // compute local mean in block around (x,y)
-      const x0 = Math.max(0, x - halfBlock);
-      const x1 = Math.min(width - 1, x + halfBlock);
-      const y0 = Math.max(0, y - halfBlock);
-      const y1 = Math.min(height - 1, y + halfBlock);
-
-      let sum = 0;
-      let count = 0;
-      for (let by = y0; by <= y1; by++) {
-        for (let bx = x0; bx <= x1; bx++) {
-          sum += data[by * width + bx];
-          count++;
-        }
-      }
-      const localMean = sum / count;
-      binary[y * width + x] = data[y * width + x] < localMean * sensitivity ? 1 : 0;
-    }
+  for (let i = 0; i < data.length; i++) {
+    binary[i] = data[i] < threshold ? 1 : 0;
   }
   return binary;
 }
 
-export function binarise(gray: GrayImage, threshold: number): Uint8Array {
-  const data = gray.data;
-  const length = data.length;
-  const binary = new Uint8Array(length);
-  for (let i = 0; i < length; i++) {
-    binary[i] = data[i] < threshold ? 1 : 0;
+/**
+ * Fast adaptive binarization using an integral image (summed area table).
+ * Total complexity is O(n) — suitable for real-time video processing.
+ * Each pixel is thresholded against the mean of its local neighbourhood,
+ * which handles uneven lighting and shadows perfectly.
+ */
+export function adaptiveBinarise(gray: GrayImage, blockRadius: number = 20, bias: number = 8): Uint8Array {
+  const { data, width, height } = gray;
+  const n = width * height;
+
+  // Build integral image (summed area table) — O(n)
+  const integral = new Float64Array(n);
+  for (let y = 0; y < height; y++) {
+    for (let x = 0; x < width; x++) {
+      const idx = y * width + x;
+      const above = y > 0 ? integral[(y - 1) * width + x] : 0;
+      const left = x > 0 ? integral[y * width + (x - 1)] : 0;
+      const aboveLeft = (y > 0 && x > 0) ? integral[(y - 1) * width + (x - 1)] : 0;
+      integral[idx] = data[idx] + above + left - aboveLeft;
+    }
   }
+
+  // Threshold each pixel against its local block mean — O(n)
+  const binary = new Uint8Array(n);
+  for (let y = 0; y < height; y++) {
+    for (let x = 0; x < width; x++) {
+      const x0 = Math.max(0, x - blockRadius);
+      const y0 = Math.max(0, y - blockRadius);
+      const x1 = Math.min(width - 1, x + blockRadius);
+      const y1 = Math.min(height - 1, y + blockRadius);
+
+      const area = (x1 - x0 + 1) * (y1 - y0 + 1);
+      const sum =
+        integral[y1 * width + x1]
+        - (x0 > 0 ? integral[y1 * width + (x0 - 1)] : 0)
+        - (y0 > 0 ? integral[(y0 - 1) * width + x1] : 0)
+        + (x0 > 0 && y0 > 0 ? integral[(y0 - 1) * width + (x0 - 1)] : 0);
+
+      const localMean = sum / area;
+      binary[y * width + x] = data[y * width + x] < localMean - bias ? 1 : 0;
+    }
+  }
+
   return binary;
 }
 
@@ -91,23 +103,22 @@ export interface PreprocessResult {
 }
 
 /**
- * Preprocessing pipeline with dual-mode thresholding.
- * Uses Otsu globally, but if the Otsu threshold looks unreliable
- * (extreme — very low or very high), falls back to adaptive local thresholding.
+ * Dual-mode preprocessing:
+ * - Runs Otsu global thresholding first (fast path, works for good even lighting)
+ * - If Otsu threshold is extreme (< 60 or > 195), the image has bad contrast/lighting
+ *   so we fall back to integral-image adaptive thresholding (handles shadows/gradients)
  */
 export function preprocess(rgba: Uint8ClampedArray, width: number, height: number): PreprocessResult {
   const gray = toGrayscale(rgba, width, height);
   const threshold = computeOtsuThreshold(gray);
 
-  // Use adaptive thresholding when Otsu threshold is in extreme zone
-  // (< 60 or > 200 indicates very uneven lighting or near-uniform image)
   let binary: Uint8Array;
-  if (threshold < 60 || threshold > 200) {
-    binary = adaptiveBinarise(gray, 40, 0.85);
+  if (threshold < 60 || threshold > 195) {
+    // Uneven lighting detected — use adaptive local thresholding
+    binary = adaptiveBinarise(gray, 20, 8);
   } else {
     binary = binarise(gray, threshold);
   }
 
   return { binary, threshold, width, height };
 }
-
