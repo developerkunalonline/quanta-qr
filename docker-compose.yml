@@ -1,0 +1,15 @@
+version: '3.8'
+
+services:
+  circular-id-web:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    image: circular-id-web:latest
+    container_name: circular-id-web-container
+    ports:
+      - '3000:3000'
+    environment:
+      - PORT=3000
+      - NODE_ENV=production
+    restart: always
