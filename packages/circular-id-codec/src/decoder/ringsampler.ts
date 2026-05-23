@@ -1,4 +1,4 @@
-import { RINGS, START_ANGLE, GAP_RATIO } from '../constants';
+import { RINGS, START_ANGLE, GAP_RATIO, SYNC_R1_PATTERN, SYNC_R6_PATTERN } from '../constants';
 
 export interface SampleResult {
   bits: number[];
@@ -68,27 +68,24 @@ export function sampleRings(
     perRingThresholds.push(0.5);
   }
 
-  // Validate R1 sync ring (12 segments, alternating)
+  // Validate R1 sync ring (12 segments)
   const r1Samples = perRingSamples[0];
-  let r1MismatchesA = 0;
-  let r1MismatchesB = 0;
+  let r1Mismatches = 0;
   for (let i = 0; i < 12; i++) {
-    if (r1Samples[i] !== (i % 2 === 0 ? 1 : 0)) r1MismatchesA++;
-    if (r1Samples[i] !== (i % 2 === 0 ? 0 : 1)) r1MismatchesB++;
+    if (r1Samples[i] !== SYNC_R1_PATTERN[i]) r1Mismatches++;
   }
-  syncR1Valid = Math.min(r1MismatchesA, r1MismatchesB) <= 3;
+  syncR1Valid = r1Mismatches <= 3;
 
-  // Validate R6 sync ring (32 segments, alternating)
+  // Validate R6 sync ring (32 segments)
   const r6Samples = perRingSamples[5];
-  let r6MismatchesA = 0;
-  let r6MismatchesB = 0;
+  let r6Mismatches = 0;
   for (let i = 0; i < 32; i++) {
-    if (r6Samples[i] !== (i % 2 === 0 ? 1 : 0)) r6MismatchesA++;
-    if (r6Samples[i] !== (i % 2 === 0 ? 0 : 1)) r6MismatchesB++;
+    if (r6Samples[i] !== SYNC_R6_PATTERN[i]) r6Mismatches++;
   }
-  syncR6Valid = Math.min(r6MismatchesA, r6MismatchesB) <= 6;
+  syncR6Valid = r6Mismatches <= 7;
 
-  if (!syncR1Valid && !syncR6Valid) {
+  // Both must be valid to guarantee correct orientation and eliminate wrong ID decodes
+  if (!syncR1Valid || !syncR6Valid) {
     return null;
   }
 
