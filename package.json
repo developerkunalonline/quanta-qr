@@ -7,6 +7,7 @@
     "apps/*"
   ],
   "scripts": {
+    "build": "npm run build -w packages/circular-id-codec && npm run build -w apps/web",
     "test": "npm run test -w packages/circular-id-codec",
     "test:e2e": "node scripts/e2e-test.js",
     "dev": "npm run dev -w apps/web"
