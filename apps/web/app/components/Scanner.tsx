@@ -155,10 +155,10 @@ export default function Scanner({ onSuccess, showBinarized = false }: ScannerPro
 
     let animationId: number;
     let lastScanTime = 0;
-    const scanIntervalMs = 120; // balanced: fast enough without overloading main thread
-    let lastDecodedId = '';
-    let consecutiveMatches = 0;
-    const CONFIRM_THRESHOLD = 2; // require 2 consecutive same-ID decodes
+    const scanIntervalMs = 120;
+    // Track last decode result for overlay feedback (no confirmation buffer — single decode fires)
+    let lastStage: string = 'searching';
+    let lastError: string = '';
 
     const processFrame = () => {
       const video = videoRef.current;
@@ -177,32 +177,75 @@ export default function Scanner({ onSuccess, showBinarized = false }: ScannerPro
       }
 
       const oCtx = overlay.getContext('2d');
+      const W = overlay.width;
+      const H = overlay.height;
+      const cx = W / 2;
+      const cy = H / 2;
+      // Use 80% of the smaller dimension for the scan zone
+      const size = Math.min(W, H) * 0.80;
+      const half = size / 2;
+      const cornerLen = size * 0.12;
+
       if (oCtx) {
-        oCtx.clearRect(0, 0, overlay.width, overlay.height);
+        oCtx.clearRect(0, 0, W, H);
 
-        // Draw elegant targeting crosshairs
-        oCtx.strokeStyle = 'rgba(99, 102, 241, 0.4)'; // indigo-500/40
-        oCtx.lineWidth = 2;
-        const cx = overlay.width / 2;
-        const cy = overlay.height / 2;
-        const size = Math.min(overlay.width, overlay.height) * 0.6;
+        // Dark vignette outside the scan zone
+        oCtx.fillStyle = 'rgba(0,0,0,0.35)';
+        oCtx.fillRect(0, 0, W, cy - half);                    // top
+        oCtx.fillRect(0, cy + half, W, H - (cy + half));       // bottom
+        oCtx.fillRect(0, cy - half, cx - half, size);          // left
+        oCtx.fillRect(cx + half, cy - half, W - (cx + half), size); // right
 
-        // Draw scanning box outline
-        oCtx.strokeRect(cx - size / 2, cy - size / 2, size, size);
-
-        // Scanning laser animation line
-        const time = Date.now() / 800;
-        const laserY = cy - size / 2 + (Math.sin(time) * 0.5 + 0.5) * size;
-        const grad = oCtx.createLinearGradient(cx - size / 2, laserY, cx + size / 2, laserY);
-        grad.addColorStop(0, 'rgba(99, 102, 241, 0)');
-        grad.addColorStop(0.5, 'rgba(99, 102, 241, 0.8)');
-        grad.addColorStop(1, 'rgba(99, 102, 241, 0)');
+        // Animated laser line inside scan zone
+        const time = Date.now() / 700;
+        const laserY = cy - half + (Math.sin(time) * 0.5 + 0.5) * size;
+        const grad = oCtx.createLinearGradient(cx - half, laserY, cx + half, laserY);
+        grad.addColorStop(0, 'rgba(99,102,241,0)');
+        grad.addColorStop(0.5, 'rgba(99,102,241,0.9)');
+        grad.addColorStop(1, 'rgba(99,102,241,0)');
         oCtx.strokeStyle = grad;
-        oCtx.lineWidth = 3;
+        oCtx.lineWidth = 2;
         oCtx.beginPath();
-        oCtx.moveTo(cx - size / 2, laserY);
-        oCtx.lineTo(cx + size / 2, laserY);
+        oCtx.moveTo(cx - half, laserY);
+        oCtx.lineTo(cx + half, laserY);
         oCtx.stroke();
+
+        // Corner brackets
+        const cornerColor = lastStage === 'ok' ? '#10b981' : lastStage === 'center' ? '#f59e0b' : '#6366f1';
+        oCtx.strokeStyle = cornerColor;
+        oCtx.lineWidth = 3;
+        oCtx.lineCap = 'round';
+
+        const drawCorner = (x: number, y: number, dx: number, dy: number) => {
+          oCtx.beginPath();
+          oCtx.moveTo(x + dx * cornerLen, y);
+          oCtx.lineTo(x, y);
+          oCtx.lineTo(x, y + dy * cornerLen);
+          oCtx.stroke();
+        };
+        drawCorner(cx - half, cy - half, 1, 1);   // top-left
+        drawCorner(cx + half, cy - half, -1, 1);  // top-right
+        drawCorner(cx - half, cy + half, 1, -1);  // bottom-left
+        drawCorner(cx + half, cy + half, -1, -1); // bottom-right
+
+        // Status text at bottom of scan zone
+        oCtx.font = 'bold 12px system-ui, sans-serif';
+        oCtx.textAlign = 'center';
+        const statusMsg = lastStage === 'ok'
+          ? ''
+          : lastStage === 'center'
+          ? '⬤ Move closer or improve lighting'
+          : lastStage === 'sample'
+          ? '◎ Center the code inside the box'
+          : lastStage === 'decode'
+          ? '⚠ Decode failed — try different angle'
+          : '· Scanning...';
+        if (statusMsg) {
+          oCtx.fillStyle = 'rgba(0,0,0,0.55)';
+          oCtx.fillRect(cx - 160, cy + half + 6, 320, 22);
+          oCtx.fillStyle = '#e2e8f0';
+          oCtx.fillText(statusMsg, cx, cy + half + 21);
+        }
       }
 
       const now = Date.now();
@@ -217,7 +260,7 @@ export default function Scanner({ onSuccess, showBinarized = false }: ScannerPro
             canvas.height = procSize;
           }
 
-          // Use full frame (letterboxed to square) for maximum coverage
+          // Crop center square from video and scale to procSize
           const vWidth = video.videoWidth;
           const vHeight = video.videoHeight;
           const cropSize = Math.min(vWidth, vHeight);
@@ -229,7 +272,7 @@ export default function Scanner({ onSuccess, showBinarized = false }: ScannerPro
           const imgData = ctx.getImageData(0, 0, procSize, procSize);
           const result = decodeImage(imgData.data, procSize, procSize);
 
-          // If debug binarized view is checked, repaint canvas with binarized pixels
+          // Show binarized debug view if toggle is on
           if (showBinarized && result.debug?.binary) {
             const bin = result.debug.binary;
             const binImgData = ctx.createImageData(procSize, procSize);
@@ -244,41 +287,35 @@ export default function Scanner({ onSuccess, showBinarized = false }: ScannerPro
           }
 
           if (result.ok) {
-            // Confirmation buffer: require N consecutive same-ID matches
-            if (result.id === lastDecodedId) {
-              consecutiveMatches++;
-            } else {
-              lastDecodedId = result.id;
-              consecutiveMatches = 1;
-            }
-            if (consecutiveMatches < CONFIRM_THRESHOLD) {
-              animationId = requestAnimationFrame(processFrame);
-              return;
-            }
-            consecutiveMatches = 0; // reset after confirmed trigger
-            // Draw a green circle around the centroid on the overlay!
+            lastStage = 'ok';
+            lastError = '';
+
+            // Draw green confirmation ring on overlay
             if (oCtx && result.debug.centerFound) {
               const { cx: dCx, cy: dCy, radius } = result.debug.centerFound;
-              // Map processor coordinates (procSize) to screen client coordinates (overlay.width/height)
               const screenScale = overlay.width / procSize;
-              const screenCx = dCx * screenScale;
-              const screenCy = dCy * screenScale;
-              const screenR = radius * screenScale;
+              // Map from crop coordinates to screen coordinates
+              const cropToScreen = (overlay.width / size);
+              const screenCx = (dCx / procSize) * overlay.width;
+              const screenCy = (dCy / procSize) * overlay.height;
+              const screenR = radius * screenScale * 3; // visual ring guide
 
-              oCtx.strokeStyle = '#10b981'; // emerald-500
+              oCtx.strokeStyle = '#10b981';
               oCtx.lineWidth = 4;
               oCtx.beginPath();
               oCtx.arc(screenCx, screenCy, screenR, 0, Math.PI * 2);
               oCtx.stroke();
 
-              // Draw ID overlay
               oCtx.fillStyle = '#10b981';
-              oCtx.font = 'bold 16px sans-serif';
+              oCtx.font = 'bold 14px system-ui, sans-serif';
               oCtx.textAlign = 'center';
-              oCtx.fillText(`DECODED: ${result.id}`, screenCx, screenCy - screenR - 10);
+              oCtx.fillText(`✓ ${result.id}`, screenCx, screenCy - screenR - 8);
             }
 
             onSuccess(result.id, result.confidence);
+          } else {
+            lastStage = result.stage;
+            lastError = result.error;
           }
         }
       }
