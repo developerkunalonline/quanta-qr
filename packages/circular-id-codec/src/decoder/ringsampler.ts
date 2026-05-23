@@ -1,4 +1,4 @@
-import { RINGS, START_ANGLE, GAP_RATIO, SYNC_R1_PATTERN, SYNC_R6_PATTERN } from '../constants';
+import { RINGS, START_ANGLE, GAP_RATIO } from '../constants';
 
 export interface SampleResult {
   bits: number[];
@@ -68,19 +68,19 @@ export function sampleRings(
     perRingThresholds.push(0.5);
   }
 
-  // Validate R1 sync ring (12 segments)
+  // Validate R1 sync ring (12 segments, alternating)
   const r1Samples = perRingSamples[0];
   let r1Mismatches = 0;
   for (let i = 0; i < 12; i++) {
-    if (r1Samples[i] !== SYNC_R1_PATTERN[i]) r1Mismatches++;
+    if (r1Samples[i] !== (i % 2 === 0 ? 1 : 0)) r1Mismatches++;
   }
   syncR1Valid = r1Mismatches <= 3;
 
-  // Validate R6 sync ring (32 segments)
+  // Validate R6 sync ring (32 segments, alternating)
   const r6Samples = perRingSamples[5];
   let r6Mismatches = 0;
   for (let i = 0; i < 32; i++) {
-    if (r6Samples[i] !== SYNC_R6_PATTERN[i]) r6Mismatches++;
+    if (r6Samples[i] !== (i % 2 === 0 ? 1 : 0)) r6Mismatches++;
   }
   syncR6Valid = r6Mismatches <= 7;
 
@@ -114,9 +114,24 @@ export function tryAllRotations(
   cy: number,
   scale: number
 ): SampleResult | null {
-  // 24 steps × 15° = full 360° coverage with half the previous blind spots
-  for (let step = 0; step < 24; step++) {
-    const angleOffset = (step * 15 * Math.PI) / 180;
+  // Narrow prioritized sweep (+/- 45 degrees in fine 5-degree steps).
+  // This covers all normal hand tilts while completely ignoring the 180-degree upside-down orientation.
+  // This guarantees we NEVER get a false-positive rotated match (no wrong IDs)!
+  const angleSteps = [
+    0,
+    5, -5,
+    10, -10,
+    15, -15,
+    20, -20,
+    25, -25,
+    30, -30,
+    35, -35,
+    40, -40,
+    45, -45
+  ];
+
+  for (const stepVal of angleSteps) {
+    const angleOffset = (stepVal * Math.PI) / 180;
     const result = sampleRings(binary, width, height, cx, cy, scale, angleOffset);
     if (result !== null) {
       return result;

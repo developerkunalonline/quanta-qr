@@ -3,9 +3,7 @@ import {
   CENTER_RADIUS,
   GAP_RATIO,
   RINGS,
-  START_ANGLE,
-  SYNC_R1_PATTERN,
-  SYNC_R6_PATTERN
+  START_ANGLE
 } from './constants';
 
 export interface DrawOptions {
@@ -79,7 +77,7 @@ export function drawCircularCode(options: DrawOptions): void {
     for (let i = 0; i < ring.segments; i++) {
       let bit = 0;
       if (ring.kind === 'sync') {
-        bit = ringIndex === 0 ? SYNC_R1_PATTERN[i] : SYNC_R6_PATTERN[i];
+        bit = (i % 2 === 0) ? 1 : 0;
       } else if (ring.kind === 'data') {
         const offset = ring.bitOffset;
         if (offset !== null) {
