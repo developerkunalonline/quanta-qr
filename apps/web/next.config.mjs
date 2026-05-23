@@ -11,6 +11,7 @@ const nextConfig = {
   experimental: {
     serverComponentsExternalPackages: ['@napi-rs/canvas'],
   },
+  transpilePackages: ['@circular-id/codec'],
 };
 
 export default nextConfig;
