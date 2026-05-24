@@ -15,7 +15,7 @@ export default function Home() {
             Proprietary Barcode Format
           </div>
           <h1 className="text-5xl sm:text-6xl font-extrabold tracking-tight bg-gradient-to-r from-white via-slate-200 to-slate-400 bg-clip-text text-transparent">
-            Circular ID Code System
+            Quanta QR
           </h1>
           <p className="text-lg sm:text-xl text-slate-400 leading-relaxed">
             An advanced, aesthetically stunning concentric ring barcode codec. Fast encoding, high-density storage, error checking, and real-time camera scanning.
@@ -23,7 +23,7 @@ export default function Home() {
         </header>
 
         {/* Action Modules */}
-        <div className="grid grid-cols-1 md:grid-cols-3 gap-8 mb-20">
+        <div className="grid grid-cols-1 md:grid-cols-3 gap-8">
           {/* Module 1: Single Generator */}
           <Link href="/generate" className="group">
             <div className="h-full bg-slate-900/40 backdrop-blur-xl border border-slate-800 rounded-3xl p-8 hover:border-indigo-500/50 hover:bg-slate-900/60 shadow-2xl transition-all duration-300 flex flex-col justify-between space-y-6">
@@ -90,39 +90,6 @@ export default function Home() {
             </div>
           </Link>
         </div>
-
-        {/* Technical Specification Section */}
-        <section className="bg-slate-900/20 border border-slate-900 rounded-3xl p-8 sm:p-12 shadow-inner">
-          <h2 className="text-3xl font-bold mb-6 text-slate-100 text-center md:text-left">
-            Technical Architecture
-          </h2>
-          <div className="grid grid-cols-1 md:grid-cols-2 gap-8 text-sm text-slate-400 leading-relaxed">
-            <div className="space-y-4">
-              <p>
-                The Circular ID Code System stores exactly <strong className="text-slate-200">20-digit numeric identifiers</strong> using concentric patterns, resulting in highly artistic codes ideal for high-tech applications, ticketing, and premium branding.
-              </p>
-              <ul className="list-disc list-inside space-y-2 text-slate-300">
-                <li><strong className="text-indigo-400">R1 (Sync):</strong> 12 alternating segments (Locator Ring)</li>
-                <li><strong className="text-indigo-400">R2 (Data):</strong> 16 bits BCD (Digits 1–4)</li>
-                <li><strong className="text-indigo-400">R3 (Data):</strong> 24 bits BCD (Digits 5–10)</li>
-                <li><strong className="text-indigo-400">R4 (Data):</strong> 24 bits BCD (Digits 11–16)</li>
-                <li><strong className="text-indigo-400">R5 (Data & Checksum):</strong> 16 bits BCD + 8-bit XOR Checksum</li>
-                <li><strong className="text-indigo-400">R6 (Sync):</strong> 32 alternating segments (Frame Ring)</li>
-              </ul>
-            </div>
-            <div className="space-y-4">
-              <p>
-                Built in pure TypeScript and native Canvas APIs, our decoding engine processes frames without heavy library overhead like OpenCV.
-              </p>
-              <ul className="list-disc list-inside space-y-2 text-slate-300">
-                <li><strong className="text-emerald-400">Otsu's Thresholding:</strong> Adaptive binarization</li>
-                <li><strong className="text-emerald-400">Blob Centroiding:</strong> Fast center circle detection</li>
-                <li><strong className="text-emerald-400">Rotation Invariant:</strong> Scans at any angle</li>
-                <li><strong className="text-emerald-400">Robust Error Correction:</strong> Checks BCD structure and XOR parity</li>
-              </ul>
-            </div>
-          </div>
-        </section>
       </div>
     </div>
   );
